@@ -7,7 +7,7 @@ import matplotlib.pyplot as plt
 
 ### 
 # IMPLEMENT ME! REPLACE WITH YOUR ANSWER TO PART 1B
-OPTIMAL_STEP_SIZE = 1.0
+OPTIMAL_STEP_SIZE = 0.1
 ###
 
 def _parse_args():
@@ -41,8 +41,8 @@ def quadratic_grad(x1, x2):
     :param x2: second coordinate
     :return: a two-dimensional numpy array containing the gradient
     """
-    alpha = 0.05
-    grad_arr = np.array([alpha * (2*x1 - 2), alpha*(16*x2 - 16)])
+
+    grad_arr = np.array([2*x1 - 2, 16*x2 - 16])
     return grad_arr
 
 def sgd_test_quadratic(args):
