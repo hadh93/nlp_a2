@@ -106,16 +106,10 @@ class NeuralSentimentClassifier(SentimentClassifier):
 
     def __init__(self, inp, hid, out, word_embeddings):
         self.word_embeddings = word_embeddings
-        self.nn = CustomNN(inp, hid, out, word_embeddings)  # FIXME
+        self.nn = CustomNN(inp, hid, out, word_embeddings)
 
     def predict(self, ex_words: List[str], has_typos: bool) -> int:
-        x = np.zeros(self.word_embeddings.get_embedding_length())
-        for word in ex_words:
-            x += self.word_embeddings.get_embedding(word)
-        x /= len(ex_words)
-        x = form_input(x)
-
-        log_probs = self.nn.forward(x)
+        log_probs = self.nn.forward(ex_words)
         prediction = torch.argmax(log_probs)
 
         return prediction
@@ -124,6 +118,7 @@ class NeuralSentimentClassifier(SentimentClassifier):
 class CustomNN(nn.Module):
     def __init__(self, inp, hid, out, word_embedding):
         super(CustomNN, self).__init__()
+        self.word_embedding = word_embedding
         self.word_embedding_layer = word_embedding.get_initialized_embedding_layer()
         self.h = nn.Linear(inp, hid)
         self.output = nn.Linear(hid, out)
@@ -132,7 +127,14 @@ class CustomNN(nn.Module):
         nn.init.xavier_uniform_(self.h.weight)
 
     def forward(self, x):
-        hidden = self.h(x)
+        x_new = torch.zeros(self.word_embedding.get_embedding_length())
+        for word in x:
+            x_new += self.word_embedding.get_embedding(word)
+        x_new /= len(x)
+        x_new = np.array(x_new)
+        x_new = form_input(x_new)
+
+        hidden = self.h(x_new)
         activated = self.non_linear(hidden)
         output = self.output(activated)
         softmaxed = self.log_softmax(output)
@@ -181,7 +183,6 @@ def train_deep_averaging_network(args, train_exs: List[SentimentExample], dev_ex
     """
 
     random.seed(2324)
-    train_model_for_typo_setting = True # FIXME: hardcode
 
     len_word_embeddings = word_embeddings.get_embedding_length()
     num_epochs = args.num_epochs
@@ -210,12 +211,16 @@ def train_deep_averaging_network(args, train_exs: List[SentimentExample], dev_ex
             if cnt % 1000 == 0:
                 print("Epoch",epoch,":", cnt,"/",len(ex_indices))
 
-
+            """
             x_new = np.zeros(word_embeddings.get_embedding_length())
             for word in train_exs[idx].words:
                 x_new += word_embeddings.get_embedding(word)
             x_new /= len(train_exs[idx].words)
             x_new = form_input(x_new)
+            """
+            x = []
+            for word in train_exs[idx].words:
+                x.append(word)
 
             # torch.nn.Embedding()
             #    word_embeddings.get_embedding(word)
@@ -230,7 +235,7 @@ def train_deep_averaging_network(args, train_exs: List[SentimentExample], dev_ex
             y_onehot.scatter_(0, torch.from_numpy(np.asarray(y, dtype=np.int64)), 1)
             # Zero out the gradients from the FFNN object. *THIS IS VERY IMPORTANT TO DO BEFORE CALLING BACKWARD()*
             ns_classifier.nn.zero_grad()
-            log_probs = ns_classifier.nn.forward(x_new)
+            log_probs = ns_classifier.nn.forward(x)
             # Can also use built-in NLLLoss as a shortcut here but we're being explicit here
             loss = criterion(log_probs, y_onehot)
             total_loss += loss
