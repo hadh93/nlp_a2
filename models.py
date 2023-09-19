@@ -8,6 +8,57 @@ import random
 from sentiment_data import *
 
 
+class PrefixEmbeddings:
+    """
+    Wraps an Indexer and a list of 1-D numpy arrays where each position in the list is the vector for the corresponding
+    word in the indexer. The 0 vector is returned if an unknown word is queried.
+    """
+
+    def __init__(self, word_indexer, vectors):
+        self.word_indexer = word_indexer
+        self.vectors = vectors
+        shortened_dict = {}
+        for k, v in word_indexer.objs_to_ints.items():
+            if len(k) > 3:
+                shortened_k = k[:3]
+            else:
+                shortened_k = k
+            shortened_dict[shortened_k] = v
+        word_indexer.objs_to_ints = shortened_dict
+        shortened_dict = {}
+        for k, v in word_indexer.ints_to_objs.items():
+            if len(v) > 3:
+                shortened_v = v[:3]
+            else:
+                shortened_v = v
+            shortened_dict[k] = shortened_v
+        word_indexer.ints_to_objs = shortened_dict
+
+    def get_initialized_embedding_layer(self, frozen=False):
+        """
+        :param frozen: True if you want the embedding layer to stay frozen, false to fine-tune embeddings
+        :return: torch.nn.Embedding layer you can use in your network
+        """
+        return torch.nn.Embedding.from_pretrained(torch.FloatTensor(self.vectors), freeze=frozen)
+
+    def get_embedding_length(self):
+        return len(self.vectors[0])
+
+    def get_embedding(self, word):
+        """
+        Returns the embedding for a given word
+        :param word: The word to look up
+        :return: The UNK vector if the word is not in the Indexer or the vector otherwise
+        """
+        if len(word) > 3:
+            word = word[:3]
+        word_idx = self.word_indexer.index_of(word)
+        if word_idx != -1:
+            return self.vectors[word_idx]
+        else:
+            return self.vectors[self.word_indexer.index_of("UNK")]
+
+
 class SentimentClassifier(object):
     """
     Sentiment classifier base type
@@ -130,16 +181,21 @@ def train_deep_averaging_network(args, train_exs: List[SentimentExample], dev_ex
     """
 
     random.seed(2324)
-
+    train_model_for_typo_setting = True # FIXME: hardcode
 
     len_word_embeddings = word_embeddings.get_embedding_length()
     num_epochs = args.num_epochs
-    initial_learning_rate = args.lr # alpha
+    initial_learning_rate = args.lr  # alpha
+
+    if train_model_for_typo_setting:
+        word_embeddings = PrefixEmbeddings(word_embeddings.word_indexer, word_embeddings.vectors)
+
+
 
     ns_classifier = NeuralSentimentClassifier(len_word_embeddings, args.hidden_size, 2,
                                               word_embeddings)
     criterion = nn.CrossEntropyLoss()
-    indexer = word_embeddings.word_indexer
+
     optimizer = optim.Adam(ns_classifier.nn.parameters(), lr=initial_learning_rate)
     for epoch in range(0, num_epochs):
 
@@ -149,9 +205,11 @@ def train_deep_averaging_network(args, train_exs: List[SentimentExample], dev_ex
 
         cnt = 0
         for idx in ex_indices:
+
             cnt += 1
             if cnt % 1000 == 0:
                 print("Epoch",epoch,":", cnt,"/",len(ex_indices))
+
 
             x_new = np.zeros(word_embeddings.get_embedding_length())
             for word in train_exs[idx].words:
@@ -159,8 +217,7 @@ def train_deep_averaging_network(args, train_exs: List[SentimentExample], dev_ex
             x_new /= len(train_exs[idx].words)
             x_new = form_input(x_new)
 
-
-            #torch.nn.Embedding()
+            # torch.nn.Embedding()
             #    word_embeddings.get_embedding(word)
             # x_onehot = torch.zeros(indexer.__len__())
             # x_onehot.scatter_(0, torch.from_numpy(np.asarray(tmp, dtype=np.int64)), 1)
@@ -170,7 +227,7 @@ def train_deep_averaging_network(args, train_exs: List[SentimentExample], dev_ex
             # way we can take the dot product directly with a probability vector to get class probabilities.
             y_onehot = torch.zeros(2)
             # scatter will write the value of 1 into the position of y_onehot given by y
-            y_onehot.scatter_(0, torch.from_numpy(np.asarray(y,dtype=np.int64)), 1)
+            y_onehot.scatter_(0, torch.from_numpy(np.asarray(y, dtype=np.int64)), 1)
             # Zero out the gradients from the FFNN object. *THIS IS VERY IMPORTANT TO DO BEFORE CALLING BACKWARD()*
             ns_classifier.nn.zero_grad()
             log_probs = ns_classifier.nn.forward(x_new)
